@@ -1166,7 +1166,7 @@ void NodeManager::updateTreeCounter(std::shared_ptr<Node> origin, NodeCounter nc
             ancestorCounter -= nc;
             break;
         }
-
+        new_nodes++;
         setNodeCounter(origin, ancestorCounter, true, nodesToReport);
         origin = origin->parent;
     }
@@ -1371,7 +1371,7 @@ void NodeManager::cleanNodes_internal()
     mNodesInRam = 0;
     mNodeToWriteInDb.reset();
     mNodeNotify.clear();
-
+    mUniqueNodes.clear();
     rootnodes.clear();
 
     if (mTable) mTable->removeNodes();
@@ -1453,7 +1453,7 @@ void NodeManager::notifyPurge()
 {
     // only lock to get the nodes to report
     sharedNode_vector nodesToReport;
-    {
+    {    
         LockGuard g(mMutex);
         nodesToReport.swap(mNodeNotify);
     }
@@ -1467,7 +1467,24 @@ void NodeManager::notifyPurge()
         if (!mClient.fetchingnodes)
         {
             assert(!mMutex.owns_lock());
-            mClient.app->nodes_updated(&nodesToReport, static_cast<int>(nodesToReport.size()));
+            if (new_nodes > total_nodes)
+            {
+                sharedNode_vector newNodesVector;
+
+                for (auto node : nodesToReport)
+                {
+                    if (mUniqueNodes.find(node) == mUniqueNodes.end())
+                    {
+                        newNodesVector.push_back(node);
+                        mUniqueNodes.insert(node);
+                    }
+                }
+                mClient.app->nodes_updated(&newNodesVector,
+                                           static_cast<int>(newNodesVector.size()));
+
+                total_nodes = new_nodes;
+            }
+
         }
 
         LockGuard g(mMutex);
