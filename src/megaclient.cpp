@@ -2624,7 +2624,7 @@ void MegaClient::exec()
                                 WAIT_CLASS::bumpds();
                                 fnstats.timeToFirstByte = WAIT_CLASS::ds - fnstats.startTime;
                             }
-
+                            
                             if (pendingcs->bufpos > pendingcs->notifiedbufpos)
                             {
                                 if (pendingcs->mChunked)
@@ -5245,7 +5245,6 @@ bool MegaClient::procsc()
                     // At this point no CurrentSeqtag should be seen. mCurrentSeqtagSeen is set true
                     // when action package is processed and the seq tag matches with mCurrentSeqtag
                     assert(!mCurrentSeqtagSeen);
-                    notifypurge();
                     if (sctable)
                     {
                         if (!pendingcs && !csretrying && !reqs.readyToSend())
@@ -6802,7 +6801,9 @@ handle MegaClient::sc_newnodes(Node* priorActionpacketDeletedNode, bool& firstHa
         switch (jsonsc.getnameid())
         {
             case makeNameid("t"):
+                isParsingActionPacket = true;
                 readtree(&jsonsc, priorActionpacketDeletedNode, firstHandleMatchesDelete);
+                isParsingActionPacket = false;
                 break;
 
             case name_id::u:
@@ -8756,7 +8757,7 @@ void MegaClient::notifypurge(void)
     if (t)
     {
         if (!fetchingnodes)
-        {
+        {            
             app->pcrs_updated(&pcrnotify[0], t);
         }
 
@@ -10339,7 +10340,7 @@ int MegaClient::readnode(JSON* j,
                          bool* firstHandleMatchesDelete)
 {
     std::shared_ptr<Node> n;
-
+    
     if (j->enterobject())
     {
         handle h = UNDEF, ph = UNDEF;
@@ -10632,6 +10633,9 @@ int MegaClient::readnode(JSON* j,
             else // Only need to save in DB if node is not notified
             {
                 mNodeManager.saveNodeInDb(n.get());
+            }
+            if (isParsingActionPacket) {
+                notifypurge();
             }
 
             n = nullptr;    // ownership is taken by NodeManager upon addNode()

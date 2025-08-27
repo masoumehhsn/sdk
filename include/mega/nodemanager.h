@@ -27,6 +27,7 @@
 #include <limits>
 #include <set>
 #include <vector>
+#include <unordered_set>
 #include "node.h"
 #include "types.h"
 
@@ -551,6 +552,9 @@ private:
     // Update a node counter for 'origin' and its subtree (recursively)
     // If operationType is INCREASE, nc is added, in other case is decreased (ie. upon deletion)
     void updateTreeCounter(std::shared_ptr<Node> origin, NodeCounter nc, OperationType operation, sharedNode_vector* nodesToReport);
+    int total_nodes = 0;
+    int new_nodes = 0;
+    std::unordered_set<std::shared_ptr<Node>> mUniqueNodes;
 
     // returns nullptr if there are unserialization errors. Also triggers a full reload (fetchnodes)
     shared_ptr<Node> getNodeFromNodeSerialized(const NodeSerialized& nodeSerialized);

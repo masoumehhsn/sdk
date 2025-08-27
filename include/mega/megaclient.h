@@ -531,6 +531,7 @@ public:
 
     // Global Multi-Factor Authentication enabled
     bool gmfa_enabled;
+    bool isParsingActionPacket = false;
 
     // Server-Side Rubbish-bin Scheduler enabled (autopurging)
     bool ssrs_enabled;
