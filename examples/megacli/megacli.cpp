@@ -6499,6 +6499,82 @@ void exec_more(autocomplete::ACState& s)
 
 void uploadLocalFolderContent(const LocalPath& localname, Node* cloudFolder, VersioningOption vo, bool allowDuplicateVersions);
 
+std::shared_ptr<Node> computeLocalFileMAC(const LocalPath& localname, const FileFingerprint& fp)
+{
+    auto identicalNodes = client->mNodeManager.getNodesByFingerprint(fp);
+    auto ifAccess = client->fsaccess->newfileaccess();
+    if (!ifAccess->fopen(localname, true, false, FSLogging::logOnError))
+    {
+        LOG_err << "Failed to open file: " << localname;
+        ifAccess.reset();
+        return nullptr;
+    }
+
+    for (auto& node: identicalNodes)
+    {
+        node->applykey();
+        auto nodeKey = node->nodekey();
+        SymmCipher nodeCipher;
+        nodeCipher.setkey((const byte*)nodeKey.data(), node->type);
+
+        const char* iva = nodeKey.data() + SymmCipher::KEYLENGTH;
+        int64_t remoteIv = MemAccess::get<int64_t>(iva);
+        int64_t remoteMac = MemAccess::get<int64_t>(iva + sizeof(int64_t));
+
+        auto result = generateMetaMac(nodeCipher, *ifAccess, remoteIv);
+        if (!result.first)
+        {
+            LOG_err << "Failed to compute local MAC for file: " << localname;
+            continue;
+        }
+
+        int64_t localMac = result.second;
+
+        if (remoteMac == localMac)
+        {
+            ifAccess.reset();
+            return node;
+        }
+        else
+        {
+            LOG_warn << "File mismatch!";
+        }
+        ifAccess.reset();
+        return nullptr;
+    }
+    return nullptr;
+}
+
+void copyFromCurrentNode(Node* parent,
+                         std::shared_ptr<Node> node,
+                         const std::string& name,
+                         VersioningOption vo)
+{
+    TreeProcCopy_mcli tc;
+    client->proctree(node, &tc, false,
+                     false);
+    tc.allocnodes();
+    client->proctree(node, &tc, false, false);
+
+    string sname = name;
+    LocalPath::utf8_normalize(&sname);
+    SymmCipher key;
+    string stringAttr;
+    AttrMap attr;
+    attr.map = node->attrs.map;
+    attr.map['n'] = sname;
+    key.setkey((const byte*)tc.nn[0].nodekey.data(), tc.nn[0].type);
+    attr.getjson(&stringAttr);
+    tc.nn[0].attrstring.reset(new string);
+    client->makeattr(&key, tc.nn[0].attrstring, stringAttr.c_str());
+
+    tc.nn[0].parenthandle = UNDEF;
+    tc.nn[0].ovhandle = node->nodeHandle();
+
+    client->putnodes(parent->nodeHandle(), vo, std::move(tc.nn), nullptr, gNextClientTag++, false);
+
+}
+
 void uploadLocalPath(nodetype_t type, std::string name, const LocalPath& localname, Node* parent, const std::string& targetuser,
     TransferDbCommitter& committer, int& total, bool recursive, VersioningOption vo,
     std::function<std::function<void()>(LocalPath)> onCompletedGenerator, bool noRetries, bool allowDuplicateVersions)
@@ -6531,6 +6607,13 @@ void uploadLocalPath(nodetype_t type, std::string name, const LocalPath& localna
                 }
             }
             fa.reset();
+            auto node = computeLocalFileMAC(localname, fp);
+            if (node)
+            {                
+                copyFromCurrentNode(parent, node, name, vo);
+                cout << "Uploads complete" << endl;
+                return;
+            }
 
             AppFilePut* f = new AppFilePut(localname, parent ? parent->nodeHandle() : NodeHandle(), targetuser.c_str());
             f->noRetries = noRetries;
@@ -6538,7 +6621,15 @@ void uploadLocalPath(nodetype_t type, std::string name, const LocalPath& localna
             if (onCompletedGenerator) f->onCompleted = onCompletedGenerator(localname);
             *static_cast<FileFingerprint*>(f) = fp;
             f->appxfer_it = appxferq[PUT].insert(appxferq[PUT].end(), f);
-            client->startxfer(PUT, f, committer, false, false, false, vo, nullptr, client->nextreqtag());
+            client->startxfer(PUT,
+                              f,
+                              committer,
+                              false,
+                              false,
+                              false,
+                              vo,
+                              nullptr,
+                              client->nextreqtag());
             total++;
         }
         else
